@@ -1,0 +1,948 @@
+---
+title: "Untitled"
+author: "Matt Coelho"
+date: "2023-08-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load packages
+library(tidyverse)
+library(reshape2)
+library(ggrepel)
+library(stringr)
+library(digest)
+library(ggpointdensity)
+library(pheatmap)
+library(viridis)
+library(RColorBrewer)
+library(ashr)
+library(glmpca)
+library(DESeq2)
+```
+
+```{r}
+#HT-29
+
+# Set the pattern for the files
+file_pattern <- "HT29"
+
+# List all files in the working directory that match the pattern
+directory <- "HT29_CHD1_MAP3K7_IFNg"
+file_list <- list.files(path = directory, pattern = file_pattern, full.names = TRUE)
+file_list
+
+# Read each file, add a sample column with the file name, and store it in a list
+df_list <- lapply(file_list, function(file) {
+  read_tsv(file) %>%
+    mutate(sample = tools::file_path_sans_ext(basename(file)))  # Remove .tsv extension from file name
+})
+df_list
+
+# Combine all data frames by row
+HT29 <- bind_rows(df_list)
+print(HT29) 
+
+hits_HT29<- HT29 %>% 
+ filter(str_count(sample, "IFNg24") == 2 | str_count(sample, "CTRL") == 2) %>% # Filter samples with "IFNg" or "CTRL" appearing twice
+    filter(padj < 0.05 & log2FoldChange > 1.32 | padj < 0.05 & log2FoldChange < -1.32 | gene %in% c("CDH17", "MUC17", "IRF8", "CXCL10", "CHD1", "MAP3K7", "CDX2")) %>%
+    select(gene) %>%
+  distinct()
+
+ HT29 %>% 
+   filter(str_count(sample, "IFNg24") == 2 | str_count(sample, "CTRL") == 2) %>% # Filter samples with "IFNg" or "CTRL" appearing twice
+    filter(padj < 0.05 & log2FoldChange > 1.32 | padj < 0.05 & log2FoldChange < -1.32 | gene %in% c("CDH17", "MUC17", "IRF8", "CXCL10", "CHD1", "MAP3K7", "CDX2")) %>%
+    select(gene) %>%
+  distinct()
+```
+
+```{r}
+#write a csv file of the HT-29 LFC values in the RNA seq for comparing to CRISPR screening data
+HT29 %>% 
+  select(!c(Neg_Log10_pval, Neg_Log10_padj)) %>%
+  write.csv("RNA_HT29_L2FC.csv")
+```
+
+```{r}
+#VCaP
+file_pattern <- "VCaP"
+
+# List all files in the working directory that match the pattern
+directory <- "VCaP_CHD1_MAP3K7_IFNg"
+file_list <- list.files(path = directory, pattern = file_pattern, full.names = TRUE)
+file_list
+
+# Read each file, add a sample column with the file name, and store it in a list
+df_list <- lapply(file_list, function(file) {
+  read_tsv(file) %>%
+    mutate(sample = tools::file_path_sans_ext(basename(file)))  # Remove .tsv extension from file name
+})
+df_list
+
+# Combine all data frames by row
+VCaP <- bind_rows(df_list)
+print(VCaP)
+
+hits_VCaP <- 
+VCaP %>% 
+    filter(str_count(sample, "IFNg") == 2 | str_count(sample, "CTRL") == 2) %>% # Filter samples with "IFNg" or "CTRL" appearing twice
+    filter(padj < 0.05 & log2FoldChange > 0.8036 | padj < 0.05 & log2FoldChange < -0.8036 | gene %in% c("CDH17", "MUC17", "IRF8", "CXCL10", "CHD1", "MAP3K7", "CDX2")) %>%
+    select(gene) %>%
+  distinct()
+
+VCaP %>% 
+    filter(str_count(sample, "IFNg") == 2 | str_count(sample, "CTRL") == 2) %>% # Filter samples with "IFNg" or "CTRL" appearing twice
+    filter(padj < 0.05 & log2FoldChange > 0.8036 | padj < 0.05 & log2FoldChange < -0.8036 | gene %in% c("CDH17", "MUC17", "IRF8", "CXCL10", "CHD1", "MAP3K7", "CDX2")) %>%
+    select(gene) %>%
+  distinct()
+```
+
+```{r}
+hits_HT29
+hits_VCaP
+
+anti_join(hits_VCaP, hits_HT29)
+semi_join(hits_VCaP, hits_HT29)
+semi_join(hits_HT29, hits_VCaP)
+```
+
+```{r}
+#all replicate values - HT29
+
+normalised_desq_counts_HT29 <- read_tsv("normalised_desq_counts_HT29.tsv")
+normalised_desq_counts_HT29
+
+# Get unique sample prefixes (e.g., HT29NTC_CTRL, HT29NTC_TREAT)
+sample_prefixes <- normalised_desq_counts_HT29 %>%
+  select(-gene) %>%
+  names() %>%
+  unique()
+
+sample_prefixes
+
+heat_map <- 
+  normalised_desq_counts_HT29 %>%  
+  filter(gene %in% c(hits_HT29$gene)) %>%
+    select(gene, contains("IFNg"))
+
+# Create the heatmap
+
+df_numeric <- heat_map %>%
+  select(gene, everything()) %>%
+  drop_na() %>%
+  column_to_rownames("gene")  # Set gene column as row names
+
+# Convert to a matrix for pheatmap
+df_matrix <- as.matrix(df_numeric)
+
+# Generate the heatmap
+plot1 <- 
+  pheatmap(
+  df_matrix,
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  show_rownames = TRUE,  # Show gene names as row names
+  show_colnames = TRUE,
+  main = "HT-29 RNA-seq.",
+  color = colorRampPalette(rev(brewer.pal(11, "RdBu")))(200),  # Set "RdBu" with 200 color levels
+  border_color = NA 
+)
+plot1
+
+ggsave(plot = plot1, "heatmap_HT29.eps", width = 3, height = 8, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+
+```
+
+```{r}
+#mean values - HT29
+normalised_desq_counts_HT29 <- read_tsv("normalised_desq_counts_HT29.tsv")
+normalised_desq_counts_HT29
+
+# Get unique sample prefixes (e.g., HT29NTC_CTRL, HT29NTC_TREAT)
+sample_prefixes <- normalised_desq_counts_HT29 %>%
+  select(-gene) %>%
+  names() %>%
+  str_remove("_R[1-3]$") %>%    # Remove the _R1, _R2, _R3 suffixes
+  unique()
+
+sample_prefixes
+
+normalised_desq_counts_HT29 <- normalised_desq_counts_HT29 %>% 
+  mutate(mean_HT29CHD1g2MAP3K7g1_CTRL = rowMeans(select(., HT29CHD1g2MAP3K7g1_CTRL_R1, HT29CHD1g2MAP3K7g1_CTRL_R2, HT29CHD1g2MAP3K7g1_CTRL_R3))) %>%
+   mutate(mean_HT29CHD1g2MAP3K7g1_IFNg24h = rowMeans(select(., HT29CHD1g2MAP3K7g1_IFNg24h_R1, HT29CHD1g2MAP3K7g1_IFNg24h_R2, HT29CHD1g2MAP3K7g1_IFNg24h_R3))) %>%
+  mutate(mean_HT29CHD1g2_CTRL = rowMeans(select(., HT29CHD1g2_CTRL_R1, HT29CHD1g2_CTRL_R2, HT29CHD1g2_CTRL_R3))) %>%
+  mutate(mean_HT29CHD1g2_IFNg24h = rowMeans(select(., HT29CHD1g2_IFNg24h_R1, HT29CHD1g2_IFNg24h_R2, HT29CHD1g2_IFNg24h_R3))) %>%
+  mutate(mean_HT29MAP3K7g1_CTRL = rowMeans(select(., HT29MAP3K7g1_CTRL_R1, HT29MAP3K7g1_CTRL_R2, HT29MAP3K7g1_CTRL_R3))) %>%
+  mutate(mean_HT29MAP3K7g1_IFNg24h = rowMeans(select(., HT29MAP3K7g1_IFNg24h_R1, HT29MAP3K7g1_IFNg24h_R2, HT29MAP3K7g1_IFNg24h_R3))) %>%
+  mutate(mean_HT29NTC_CTRL = rowMeans(select(., HT29NTC_CTRL_R1, HT29NTC_CTRL_R2, HT29NTC_CTRL_R3))) %>%
+  mutate(mean_HT29NTC_IFNg24h = rowMeans(select(., HT29NTC_IFNg24h_R1, HT29NTC_IFNg24h_R2, HT29NTC_IFNg24h_R3)))
+
+heat_map <- 
+  normalised_desq_counts_HT29 %>%  
+  filter(gene %in% c(hits_HT29$gene)) %>%
+  select(gene, contains("mean"))
+
+# Create the heatmap
+
+df_numeric <- heat_map %>%
+  select(gene, everything()) %>%
+  drop_na() %>%
+  column_to_rownames("gene")  # Set gene column as row names
+
+# Convert to a matrix for pheatmap
+df_matrix <- as.matrix(df_numeric)
+
+# Generate the heatmap
+plot1 <- 
+  pheatmap(
+  df_matrix,
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  show_rownames = TRUE,  # Show gene names as row names
+  show_colnames = TRUE,
+  main = "Heatmap of Averages Across Samples"
+)
+plot1
+```
+
+```{r}
+#write a csv file for comparing with CRISPR KO data
+normalised_desq_counts_HT29 %>%
+  select(gene, contains("mean")) %>%
+  write.csv("RNA_HT29_deseq2_norm_counts_mean.csv")
+```
+
+```{r}
+# VCap replicate values
+normalised_desq_counts_VCaP <- read_tsv("normalised_desq_counts_VCaP.tsv")
+normalised_desq_counts_VCaP 
+
+#remove replicate 3 CHD1 as an outlier
+normalised_desq_counts_VCaP <-
+  normalised_desq_counts_VCaP %>% 
+  select(!c(VCaPCHD1g2_IFNg24h_R3))
+  
+# Get unique sample prefixes (e.g., VCaPNTC_CTRL, VCapNTC_TREAT)
+sample_prefixes <- normalised_desq_counts_VCaP %>%
+  select(-gene) %>%
+  names() %>%
+  unique()
+
+sample_prefixes
+
+heat_map <- 
+  normalised_desq_counts_VCaP %>%  
+  filter(gene %in% c(hits_VCaP$gene)) %>%
+    select(gene, contains("IFNg"))
+
+heat_map
+# Create the heatmap
+
+df_numeric <- heat_map %>%
+  select(gene, everything()) %>%
+  drop_na() %>%
+  column_to_rownames("gene")  # Set gene column as row names
+
+# Convert to a matrix for pheatmap
+df_matrix <- as.matrix(df_numeric)
+
+# Generate the heatmap
+plot2 <- pheatmap(
+  df_matrix,
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  show_rownames = TRUE,  # Show gene names as row names
+  show_colnames = TRUE,
+  main = "VCaP RNA-seq.",
+  color = colorRampPalette(rev(brewer.pal(11, "RdBu")))(200),  # Set "RdBu" with 200 color levels
+  border_color = NA 
+)
+plot2
+
+ggsave(plot = plot2, "heatmap_VCaP.eps", width = 3, height = 8, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+```
+
+```{r}
+# VCap average
+normalised_desq_counts_VCaP <- read_tsv("normalised_desq_counts_VCaP.tsv")
+normalised_desq_counts_VCaP
+
+
+# Get unique sample prefixes (e.g., HT29NTC_CTRL, HT29NTC_TREAT)
+sample_prefixes <- normalised_desq_counts_VCaP %>%
+  select(-gene) %>%
+  names() %>%
+  str_remove("_R[1-3]$") %>%    # Remove the _R1, _R2, _R3 suffixes
+  unique()
+
+sample_prefixes
+
+normalised_desq_counts_VCaP <- normalised_desq_counts_VCaP %>% 
+  mutate(mean_VCaPCHD1g2MAP3K7g2_CTRL = rowMeans(select(., VCaPCHD1g2MAP3K7g2_CTRL_R1, VCaPCHD1g2MAP3K7g2_CTRL_R2, VCaPCHD1g2MAP3K7g2_CTRL_R3))) %>%
+   mutate(mean_VCaPCHD1g2MAP3K7g2_IFNg24h = rowMeans(select(., VCaPCHD1g2MAP3K7g2_IFNg24h_R1, VCaPCHD1g2MAP3K7g2_IFNg24h_R2, VCaPCHD1g2MAP3K7g2_IFNg24h_R3))) %>%
+  mutate(mean_VCaPCHD1g2_CTRL = rowMeans(select(., VCaPCHD1g2_CTRL_R1, VCaPCHD1g2_CTRL_R2, VCaPCHD1g2_CTRL_R3))) %>%
+  mutate(mean_VCaPCHD1g2_IFNg24h = rowMeans(select(., VCaPCHD1g2_IFNg24h_R1, VCaPCHD1g2_IFNg24h_R2))) %>%
+  mutate(mean_VCaPMAP3K7g1_CTRL = rowMeans(select(., VCaPMAP3K7g1_CTRL_R1, VCaPMAP3K7g1_CTRL_R2, VCaPMAP3K7g1_CTRL_R3))) %>%
+  mutate(mean_VCaPMAP3K7g1_IFNg24h = rowMeans(select(., VCaPMAP3K7g1_IFNg24h_R1, VCaPMAP3K7g1_IFNg24h_R2, VCaPMAP3K7g1_IFNg24h_R3))) %>%
+  mutate(mean_VCaPMAP3K7g2_CTRL = rowMeans(select(., VCaPMAP3K7g2_CTRL_R1, VCaPMAP3K7g2_CTRL_R2, VCaPMAP3K7g2_CTRL_R3))) %>%
+  mutate(mean_VCaPMAP3K7g2_IFNg24h = rowMeans(select(., VCaPMAP3K7g2_IFNg24h_R1, VCaPMAP3K7g2_IFNg24h_R2, VCaPMAP3K7g2_IFNg24h_R3))) %>%
+  mutate(mean_VCaPNTC_CTRL = rowMeans(select(., VCaPNTC_CTRL_R1, VCaPNTC_CTRL_R2, VCaPNTC_CTRL_R3))) %>%
+  mutate(mean_VCaPNTC_IFNg24h = rowMeans(select(., VCaPNTC_IFNg24h_R1, VCaPNTC_IFNg24h_R2, VCaPNTC_IFNg24h_R3)))
+
+heat_map <- 
+  normalised_desq_counts_VCaP %>%  
+  filter(gene %in% c(hits_VCaP$gene)) %>%
+  select(gene, contains("mean"))
+
+heat_map
+# Create the heatmap
+
+df_numeric <- heat_map %>%
+  select(gene, everything()) %>%
+  drop_na() %>%
+  column_to_rownames("gene")  # Set gene column as row names
+
+# Convert to a matrix for pheatmap
+df_matrix <- as.matrix(df_numeric)
+
+# Generate the heatmap
+plot2 <- pheatmap(
+  df_matrix,
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  show_rownames = TRUE,  # Show gene names as row names
+  show_colnames = TRUE,
+  main = "Heatmap of Averages Across Samples"
+)
+plot2
+```
+
+```{r}
+
+# Get unique sample prefixes (e.g., HT29NTC_CTRL, HT29NTC_TREAT)
+sample_prefixes <- normalised_desq_counts_VCaP %>%
+  select(-gene) %>%
+  names() %>%
+  str_remove("_R[1-3]$") %>%    # Remove the _R1, _R2, _R3 suffixes
+  unique()
+
+sample_prefixes
+
+normalised_desq_counts_VCaP <- normalised_desq_counts_VCaP %>% 
+  mutate(mean_VCaPCHD1g2MAP3K7g2_CTRL = rowMeans(select(., VCaPCHD1g2MAP3K7g2_CTRL_R1, VCaPCHD1g2MAP3K7g2_CTRL_R2, VCaPCHD1g2MAP3K7g2_CTRL_R3))) %>%
+   mutate(mean_VCaPCHD1g2MAP3K7g2_IFNg24h = rowMeans(select(., VCaPCHD1g2MAP3K7g2_IFNg24h_R1, VCaPCHD1g2MAP3K7g2_IFNg24h_R2, VCaPCHD1g2MAP3K7g2_IFNg24h_R3))) %>%
+  mutate(mean_VCaPCHD1g2_CTRL = rowMeans(select(., VCaPCHD1g2_CTRL_R1, VCaPCHD1g2_CTRL_R2, VCaPCHD1g2_CTRL_R3))) %>%
+  mutate(mean_VCaPCHD1g2_IFNg24h = rowMeans(select(., VCaPCHD1g2_IFNg24h_R1, VCaPCHD1g2_IFNg24h_R2))) %>%
+  mutate(mean_VCaPMAP3K7g1_CTRL = rowMeans(select(., VCaPMAP3K7g1_CTRL_R1, VCaPMAP3K7g1_CTRL_R2, VCaPMAP3K7g1_CTRL_R3))) %>%
+  mutate(mean_VCaPMAP3K7g1_IFNg24h = rowMeans(select(., VCaPMAP3K7g1_IFNg24h_R1, VCaPMAP3K7g1_IFNg24h_R2, VCaPMAP3K7g1_IFNg24h_R3))) %>%
+  mutate(mean_VCaPMAP3K7g2_CTRL = rowMeans(select(., VCaPMAP3K7g2_CTRL_R1, VCaPMAP3K7g2_CTRL_R2, VCaPMAP3K7g2_CTRL_R3))) %>%
+  mutate(mean_VCaPMAP3K7g2_IFNg24h = rowMeans(select(., VCaPMAP3K7g2_IFNg24h_R1, VCaPMAP3K7g2_IFNg24h_R2, VCaPMAP3K7g2_IFNg24h_R3))) %>%
+  mutate(mean_VCaPNTC_CTRL = rowMeans(select(., VCaPNTC_CTRL_R1, VCaPNTC_CTRL_R2, VCaPNTC_CTRL_R3))) %>%
+  mutate(mean_VCaPNTC_IFNg24h = rowMeans(select(., VCaPNTC_IFNg24h_R1, VCaPNTC_IFNg24h_R2, VCaPNTC_IFNg24h_R3)))
+
+heat_map <- 
+  normalised_desq_counts_VCaP %>%  
+  filter(gene %in% c(hits_VCaP$gene))
+
+heat_map
+# Create the heatmap
+
+df_numeric <- heat_map %>%
+  select(gene, everything()) %>%
+  drop_na() %>%
+  column_to_rownames("gene")  # Set gene column as row names
+
+# Convert to a matrix for pheatmap
+df_matrix <- as.matrix(df_numeric)
+
+# Generate the heatmap
+plot2 <- pheatmap(
+  df_matrix,
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  show_rownames = TRUE,  # Show gene names as row names
+  show_colnames = TRUE,
+  main = "Heatmap of Averages Across Samples"
+)
+plot2
+
+```
+
+```{r}
+# Volcano plot dKO vs NT IFNg
+
+dKO_vs_NTC_IFNg <- read_tsv("HT29_CHD1_MAP3K7_IFNg/HT29CHD1g2MAP3K7g1_IFNg24h_vs_HT29NTC_IFNg24h.tsv")
+CDX2_vs_NTC_CTRL <- read_tsv("HT29_CDX2_IFNg/HT29_CDX2g1_CTRL_vs_HT29_NTC_CTRL.tsv")
+CDX2_vs_NTC_IFNg <- read_tsv("HT29_CDX2_IFNg/HT29_CDX2g1_IFNg_vs_HT29_NTC_IFNg.tsv")
+dKO_vs_tKO_IFNg <- read_tsv("HT29_CDX2_IFNg/HT29_CHD1g2MAP3K7g1_IFNg_vs_HT29_CHD1g2MAP3K7g1CDX2g1_IFNg.tsv")
+dKO_vs_NTC_72h_IFNg <- read_tsv("HT29_CDX2_IFNg/HT29_CHD1g2MAP3K7g1_IFNg_vs_HT29_NTC_IFNg.tsv")
+
+dKO_vs_NTC_IFNg_VCaP <- read_tsv("VCaP_DESeq2_IFNg_Without_CHD1g2_IFNg_R3/VCaPCHD1g2MAP3K7g2_IFNg24h_vs_VCaPNTC_IFNg24h.tsv")
+```
+
+```{r}
+# generate Expression key for volcano plots
+
+dKO_vs_NTC_IFNg <- 
+  dKO_vs_NTC_IFNg %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+dKO_vs_NTC_IFNg <- 
+  dKO_vs_NTC_IFNg %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+
+plot1 <- ggplot(dKO_vs_NTC_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 1.5 & padj < 0.05 |  log2FoldChange < -1.2 & padj < 0.05 | gene == "IRF8", gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70")) +
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+
+ggsave(plot = plot1, "volcano_RNA_HT29.eps", width = 6, height = 4, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+```
+
+```{r}
+# generate Expression key for volcano plots
+
+dKO_vs_NTC_IFNg_VCaP <- 
+  dKO_vs_NTC_IFNg_VCaP %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+dKO_vs_NTC_IFNg_VCaP <- 
+  dKO_vs_NTC_IFNg_VCaP %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+
+plot1 <- ggplot(dKO_vs_NTC_IFNg_VCaP, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 0.5 & padj < 0.05 |  log2FoldChange < -0.3 & padj < 0.05 | gene == "CDX2" | gene == "IRF8" | gene == "CFLAR", gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70")) +
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+```{r}
+# generate Expression key for volcano plots
+
+CDX2_vs_NTC_CTRL <- 
+  CDX2_vs_NTC_CTRL %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+CDX2_vs_NTC_CTRL <- 
+  CDX2_vs_NTC_CTRL %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+
+plot1 <- ggplot(CDX2_vs_NTC_CTRL, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 0.5 & padj < 0.05 |  log2FoldChange < -0.5 & padj < 0.05 | gene == "IRF8" | gene == "CFLAR", gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70")) +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+```{r}
+# generate Expression key for volcano plots
+CDX2_vs_NTC_IFNg <- 
+  CDX2_vs_NTC_IFNg %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+CDX2_vs_NTC_IFNg <- 
+  CDX2_vs_NTC_IFNg %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+
+plot1 <- ggplot(CDX2_vs_NTC_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 0.5 & padj < 0.05 |  log2FoldChange < -0.5 & padj < 0.05 | gene == "IRF8" | gene == "CFLAR", gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70")) +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+```{r}
+# generate Expression key for volcano plots
+dKO_vs_tKO_IFNg <- 
+  dKO_vs_tKO_IFNg %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+dKO_vs_tKO_IFNg <- 
+  dKO_vs_tKO_IFNg %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+plot1 <- ggplot(dKO_vs_tKO_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 1.8 & padj < 0.05 |  log2FoldChange < -1.8 & padj < 0.05 | gene == "IRF8" | gene == "CFLAR", gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70"), na.value="grey80") +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+
+```{r}
+autophagy <- c("ATG1", "ATG2", "ATG3", "ATG4", "ATG5", "ATG6", "ATG7", "ATG8", "ATG8", "ATG9", "ATG10", "ATG11", "ATG12", "ATG13", "ATG9A", "ATG16", "RIPK1", "MTOR", "TSC2", "CFLAR", "CASP8")
+```
+
+
+```{r}
+#volcano plot
+plot1 <- ggplot(dKO_vs_tKO_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(gene %in% autophagy, gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70"), na.value="grey80") +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+
+```{r}
+# generate Expression key for volcano plots
+dKO_vs_NTC_72h_IFNg <- 
+  dKO_vs_NTC_72h_IFNg %>%
+  mutate(Expression = ifelse(log2FoldChange >0 & padj < 0.05, "High", 
+                             ifelse(log2FoldChange < 0 & padj < 0.05, "Low",
+                                    "Not significant")))
+
+#remove NA values
+dKO_vs_NTC_72h_IFNg <- 
+  dKO_vs_NTC_72h_IFNg %>% 
+  filter(is.na(neg_Log10_padj) == FALSE)
+```
+
+```{r}
+#volcano plot
+plot1 <- ggplot(dKO_vs_NTC_72h_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(log2FoldChange > 3 & padj < 0.05 |  log2FoldChange < -3 & padj < 0.05, gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70"), na.value="grey80") +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+
+```{r}
+#volcano plot
+plot1 <- ggplot(dKO_vs_NTC_72h_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(gene == "IRF8" | gene == "CFLAR" | gene %in% autophagy, gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70"), na.value="grey80") +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+```{r}
+#volcano plot
+plot1 <- ggplot(dKO_vs_tKO_IFNg, aes(x=log2FoldChange, y= neg_Log10_padj, colour = Expression)) +
+geom_point(shape =1, size =2) +
+geom_text_repel(aes(label=ifelse(gene %in% autophagy, gene, "")), size=3, colour =  "black", max.overlaps = Inf) +
+theme_classic() +
+scale_colour_manual(values=c("red", "blue", "grey70"), na.value="grey80") +
+#scale_size(transform = "reverse", range = c(0.1,3.5) ) 
+xlab("Log2 fold change") + 
+ylab("-Log10 (P-value)")
+plot1
+```
+
+```{r}
+dKO_vs_NTC_72h_IFNg %>%
+  filter(gene == "CFLAR")
+
+dKO_vs_tKO_IFNg %>%
+    filter(gene == "CFLAR")
+```
+
+```{r}
+# dot plot VCaP 
+
+PROGENy_VCap <- read.csv("VCaP_pathway_scores_all_samples.csv")
+
+#filtering for significant associated pathways
+PROGENy_VCap <- PROGENy_VCap %>% filter(p_value < 0.05)
+```
+
+```{r}
+# dot plot VCaP 
+
+plot1 <- ggplot(PROGENy_VCap, aes(x=source, y=condition, colour=score, size=p_value)) +
+  geom_point(shape=16) +
+  theme_classic() +
+  scale_color_distiller(palette="RdBu", values=seq(0, 1, length.out=11)) +
+  scale_size(transform="reverse", range=c(0.1, 5.5)) +
+  theme(axis.text.x=element_text(angle=90, hjust=1)) +
+  xlab("")+
+  ylab("")
+plot1
+
+ggsave(plot = plot1, "dots_VCaP.eps", width = 5.5, height = 4, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+```
+
+```{r}
+# dot plot HT29 
+
+PROGENy_HT29 <- read.csv("HT29_pathway_scores_all_samples.csv")
+
+#filtering for significant associated pathways
+PROGENy_HT29 <- PROGENy_HT29 %>% filter(p_value < 0.05)
+```
+
+```{r}
+# dot plot HT29 
+
+plot1 <- ggplot(PROGENy_HT29, aes(x=source, y=condition, colour=score, size=p_value)) +
+  geom_point(shape=16) +
+  theme_classic() +
+  scale_color_distiller(palette="RdBu", values=seq(0, 1, length.out=11)) +
+  scale_size(transform="reverse", range=c(0.1, 5.5)) +
+  theme(axis.text.x=element_text(angle=90, hjust=1)) +
+  xlab("")+
+  ylab("")
+plot1
+```
+
+```{r}
+#PCA from Alex
+df_count <-read_csv("HT29_TKO_merged_counts.csv", col_types = NULL, show_col_types = FALSE)
+samples <- read_csv("HT29_TKO_design.csv", col_types = NULL, show_col_types = FALSE) 
+```
+
+```{r}
+coldata <- samples[,c("replicate","condition","group","timepoint")]
+coldata$replicate <- factor(coldata$replicate)
+coldata$condition <- factor(coldata$condition)
+coldata$group <- factor(coldata$group)
+coldata$timepoint <- factor(coldata$timepoint)
+rownames(coldata)<-coldata$replicate
+# created all vs all pairwise comparisons
+design<-model.matrix(~0+condition,coldata) # ---follow from here in section 7.6 from doc https://bioconductor.org/packages/release/workflows/vignettes/RNAseq123/inst/doc/designmatrices.html
+
+# check duplicates
+table(duplicated(df_count$gene))
+# find duplicate rows and concatenate ensid and gene if duplicate rows are found
+tmp_df<- df_count %>%  
+  #filter(biotype == "protein_coding") %>% # filtering before deseq analysis is not recommended as this will hamper DESeq2 size factor and dispersion calculation  
+              filter(rowSums(dplyr::select(.,-(ensid:longest_isoform))) > 0) %>% # ignore metadata columns and filter rows with 0 count...
+              group_by(gene) %>%
+              mutate(gene_id = case_when( n()>1 ~ paste(ensid,gene,sep="_"), TRUE ~ gene), .before = ensid ) %>% 
+             # concat ensid_gene for duplicate gene rows
+              ungroup()%>%
+              dplyr::select(!(ensid:longest_isoform))
+
+table(duplicated(tmp_df$gene_id))
+df_coding_filtered<-data.frame(tmp_df,row.names = 1, stringsAsFactors=FALSE, check.names = FALSE)
+
+# check all samples in metedata and count matrix
+all(rownames(coldata) %in% colnames(df_coding_filtered))
+all(rownames(coldata) == colnames(df_coding_filtered)) # if false set the correct order
+df_coding_filtered <- df_coding_filtered[, rownames(coldata)] # select row names in order
+
+# add pseudo count of 1 to avoid issue with subset of 0 count genes
+df_refilter_subset <- df_coding_filtered + 1
+
+# create deseq2 matrix
+dds <- DESeqDataSetFromMatrix(countData = df_refilter_subset,
+                              colData = coldata,
+                              design = ~0+condition
+                              )
+
+
+#Additing addtional data
+featureData <- data.frame(gene=rownames(df_refilter_subset))
+mcols(dds) <- DataFrame(mcols(dds), featureData)
+mcols(dds)
+dds
+#https://combine-australia.github.io/RNAseq-R/slides/RNASeq_filtering_qc.pdf
+#https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#htseq
+
+
+# filtering of low count genes
+keep <- rowSums(counts(dds) >= 20) >= 6 # smallest group of samples = 6
+dds <- dds[keep,]
+dds
+
+# varinace stabilisation test
+vsd <- vst(dds, blind = FALSE)
+# plot distance matrix
+sampleDists <- dist(t(assay(vsd)))
+sampleDists
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- paste(vsd$replicate,vsd$timepoint,sep="_")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap <- pheatmap(sampleDistMatrix, #Alex changed this (added a name for the plot)
+         main="Euclidean distance between samples based on VST (variance stabilizing transformation)",
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+```
+
+```{r}
+# Use rlog for transformation
+rld <- rlog(dds, blind=TRUE) # rlog transformation
+
+#Plot PCA with all replicate points
+
+# Generate PCA plot
+plotPCA(rld, intgroup="condition")
+pca_data <- plotPCA(rld, intgroup="condition", ntop = 500, returnData=TRUE)
+
+PCA_all_labeledggplot <- ggplot(pca_data, aes(x=PC1, y=PC2, color=condition)) +
+  geom_point(size=4) +
+  scale_colour_manual(values=c("grey65", "blue", "grey40", "red", "grey80", "orange", "black", "purple")) +
+  xlab("PC1 - 91 % variance") + 
+  ylab("PC2 - 7 % variance") +
+  theme_classic()
+PCA_all_labeledggplot
+
+ggsave("HT29_TKO_IFNg_PCA_all.eps", width = 6, height = 6)
+```
+```{r}
+# Access rlog-transformed assay data
+rlog_matrix <- assay(rld)
+
+# Perform PCA manually
+pca_result <- prcomp(t(rlog_matrix))
+
+# Extract loadings
+loadings <- pca_result$rotation  # Genes (rows) by PCs (columns)
+
+
+# Top 25 genes for PC1
+top_genes_PC1 <- head(order(abs(loadings[, "PC1"]), decreasing=TRUE), 20)
+
+# Top 25 genes for PC2
+top_genes_PC2 <- head(order(abs(loadings[, "PC2"]), decreasing=TRUE), 20)
+
+# Extract the gene names
+genes_PC1 <- rownames(loadings)[top_genes_PC1]
+genes_PC2 <- rownames(loadings)[top_genes_PC2]
+
+# Print top genes
+cat("Top 20 genes for PC1:\n", genes_PC1, "\n")
+cat("Top 20 genes for PC2:\n", genes_PC2, "\n")
+
+```
+
+```{r}
+
+# Extract PCA data from plotPCA
+pca_data <- plotPCA(rld, intgroup = "condition", returnData = TRUE)
+
+# Add the expression of CDX2
+cdx2_expression <- assay(rld)["CDX2", ]  # Get CDX2 expression values
+pca_data$CDX2 <- cdx2_expression[match(pca_data$name, colnames(assay(rld)))]
+
+# Plot PCA with ggplot2
+
+rd_bu_palette <- rev(brewer.pal(11, "RdBu"))  # Reverse to make red high and blue low
+
+plot1 <- ggplot(pca_data, aes(x = PC1, y = PC2, color = CDX2, shape = condition)) +
+  geom_point(size = 5) +
+  scale_color_gradientn(colors = rd_bu_palette) +  # Use RdBu palette
+  labs(
+    title = "",
+    x = "PC1",
+    y = "PC2",
+    color = "CDX2 expression"
+  ) +
+  #geom_text_repel(aes(label=name), size=3) + # Adjust size as needed
+  scale_shape_manual(values=c(0, 15, 1, 16, 2, 17, 5, 18)) +
+  theme_classic()
+plot1
+
+ggsave(plot = plot1, "PCA_HT29.eps", width = 8, height = 5, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+
+```
+
+```{r}
+PCA_all_labeledggplot <- ggplot(pca_data, aes(x=PC1, y=PC2, color=condition)) +
+  geom_point(size=4) +
+  geom_text_repel(aes(label=name), size=3) + # Adjust size as needed
+  scale_colour_manual(values=c("grey65", "blue", "grey40", "red", "grey80", "orange", "black", "purple")) +
+  xlab("PC1 - 91 % variance") + 
+  ylab("PC2 - 7 % variance") +
+  theme_classic()
+PCA_all_labeledggplot
+```
+```{r}
+#GSEA plots
+
+# Load the data
+gsea_data_1 <- read.delim("dKO_vs_tKO_TNFA_GSEA.tsv", header = TRUE, sep = "\t")
+gsea_data_2 <- read.delim("dKO_vs_NT_TNFA_GSEA.tsv", header = TRUE, sep = "\t")
+
+# Add a dataset identifier to each dataset
+gsea_data_1$Dataset <- "dKO versus tKO"
+gsea_data_2$Dataset <- "dKO versus NT"
+
+# Prepare the data (if needed)
+gsea_data_1 <- gsea_data_1 %>%
+  arrange(RANK.IN.GENE.LIST) # Ensure data is ordered by rank
+
+gsea_data_2 <- gsea_data_2 %>%
+  arrange(RANK.IN.GENE.LIST) # Ensure data is ordered by rank
+
+combined_data <- bind_rows(gsea_data_1, gsea_data_2)
+
+
+# Create the overlay GSEA plot
+gsea_overlay_plot <- ggplot(combined_data, aes(x = RANK.IN.GENE.LIST, y = RUNNING.ES, color = Dataset)) +
+  geom_line(size = 1) +  # Line plots for each dataset
+  geom_rug(data = gsea_data_1, aes(x = RANK.IN.GENE.LIST), inherit.aes = FALSE, sides = "b", color = "royalblue2", alpha = 1) +  # Rug plot for Dataset 1
+  geom_rug(data = gsea_data_2, aes(x = RANK.IN.GENE.LIST), inherit.aes = FALSE, sides = "b", color = "red2", alpha = 1) +  # Rug plot for Dataset 2
+  theme_minimal() +
+  labs(
+    title = "GSEA - \nHALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    x = "Gene rank",
+    y = "Enrichment score",
+    color = "") +
+    scale_colour_manual(values=c("royalblue2", "red2")) +
+  theme_classic()
+print(gsea_overlay_plot)
+
+ggsave(plot = gsea_overlay_plot, "GSEA_HT29.eps", width = 7, height = 5, path ="/Users/mc32/Documents/Matt_Coelho/Bioinformatics/Minlib_SL_JAK1_JAK2_Cas9_Watterson/RNAseq/figures_export")
+```
+
+```{r}
+dKO_24h <- read.csv("dKO_vs_NT_24h_GSEA.csv", header = TRUE)
+dKO_72h <- read.csv("dKO_vs_NT_72h_GSEA.csv", header = TRUE)
+tKO_72h <- read.csv("dKO_vs_tKO_72h_GSEA.csv", header = TRUE)
+
+dKO_24h
+dKO_72h
+tKO_72h
+
+GSEA_scores <- full_join(dKO_24h, dKO_72h)
+GSEA_scores <- full_join(GSEA_scores, tKO_72h)
+
+GSEA_scores
+
+GSEA_scores %>%
+  filter(Gene.Set %in% c("HALLMARK_MTORC1_SIGNALING", "REACTOME_AUTOPHAGY", "HALLMARK_TNFA_SIGNALING_VIA_NFKB"))
+  
+```
+```{r}
+# plot GSEA results to find relevant signatures that are significant and reversed with CDX2 KO 
+
+plot1 <- ggplot(GSEA_scores, aes(x=NES_dKO_vs_NT_72h, y= NES_dKO_vs_tKO, colour = FDR.q.val_dKO_vs_tKO, size = FDR.q.val_dKO_vs_NT_72h)) +
+geom_point(shape = 16) +
+geom_text_repel(aes(label=ifelse(NES_dKO_vs_NT > 1.5 | NES_dKO_vs_NT < -1.5 & NES_dKO_vs_NT_72h > 1.5 | NES_dKO_vs_NT_72h < -1.5 & NES_dKO_vs_tKO > 1.5 | NES_dKO_vs_tKO < -1.5, Gene.Set, "")), size=3, max.overlaps = Inf) +
+theme_classic() +
+#scale_colour_manual(values=c("red", "blue", "grey70")) +
+xlab("NES_dKO_vs_NT_72h") + 
+ylab("NES_dKO_vs_tKO") +
+scale_size(transform = "reverse", range = c(0.1,4) ) +
+scale_color_distiller(palette="RdBu", direction = 1, values=seq(0, 1, length.out=11))
+plot1
+
+plot2 <- ggplot(GSEA_scores, aes(x=NES_dKO_vs_NT, y= NES_dKO_vs_tKO, colour = FDR.q.val_dKO_vs_tKO, size = FDR.q.val_dKO_vs_NT_72h)) +
+geom_point(shape = 16) +
+geom_text_repel(aes(label=ifelse(NES_dKO_vs_NT > 1.3 | NES_dKO_vs_NT < -1.3 & NES_dKO_vs_NT_72h > 1.3 | NES_dKO_vs_NT_72h < -1.3 & NES_dKO_vs_tKO > 1.3 | NES_dKO_vs_tKO < -1.3, Gene.Set, "")), size=3, max.overlaps = Inf) +
+theme_classic() +
+#scale_colour_manual(values=c("red", "blue", "grey70")) +
+xlab("NES_dKO_vs_NT") + 
+ylab("NES_dKO_vs_tKO") +
+scale_size(transform = "reverse", range = c(0.1,4) ) +
+scale_color_distiller(palette="RdBu", direction = 1, values=seq(0, 1, length.out=11))
+plot2
+```
+
+```{r}
+#overlay two different GSEA plots
+
+# Load the data
+gsea_data1 <- read.delim(file_path1, header = TRUE, sep = "\t")
+gsea_data2 <- read.delim(file_path2, header = TRUE, sep = "\t")
+
+# Add a dataset identifier to each dataset
+gsea_data1$Dataset <- "Dataset 1"
+gsea_data2$Dataset <- "Dataset 2"
+
+# Combine the datasets
+combined_data <- bind_rows(gsea_data1, gsea_data2)
+
+# Ensure the required columns are present
+if (!all(c("EnrichmentScore", "Rank", "Dataset") %in% colnames(combined_data))) {
+  stop("The combined dataset must contain 'EnrichmentScore', 'Rank', and 'Dataset'")
+}
+
+# Create the overlay GSEA plot
+gsea_overlay_plot <- ggplot(combined_data, aes(x = Rank, y = EnrichmentScore, color = Dataset)) +
+  geom_line(size = 1) +  # Line plots for each dataset
+  geom_rug(data = gsea_data1, aes(x = Rank), inherit.aes = FALSE, sides = "b", color = "blue", alpha = 0.5) +  # Rug plot for Dataset 1
+  geom_rug(data = gsea_data2, aes(x = Rank), inherit.aes = FALSE, sides = "b", color = "red", alpha = 0.5) +  # Rug plot for Dataset 2
+  theme_minimal() +
+  labs(
+    title = "Overlayed GSEA Plots",
+    x = "Rank in Ordered Dataset",
+    y = "Enrichment Score",
+    color = "Dataset"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title = element_text(face = "bold")
+  )
+
+# Print the plot
+print(gsea_overlay_plot)
+
+```
